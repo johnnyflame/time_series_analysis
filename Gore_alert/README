@@ -1,0 +1,3 @@
+This is a script to send SMS alert when NH3 level is above 50 ppm. The config file has been set to only report FLD
+and OPLD unit from Gore. ( "2C2FF2", "2C31B4")
+
