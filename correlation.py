@@ -274,7 +274,6 @@ def main():
     dbname = 'photonic'
 
 
-    # Temporarily avoid line protocol time conversion issues #412, #426, #431.
     protocol = 'json'
 
     client = DataFrameClient(photonic_host, port, user, password, database=dbname)
@@ -282,7 +281,7 @@ def main():
 
 
 
-    """
+    """f
     
     Units without sufficient data
     
@@ -290,17 +289,17 @@ def main():
     """
 
     radio_units = [
-                #"2C2FF2",
-                # "2C3195",
-                #"2C31B0",
-                # "2C31BE",
-                # "2C31D2",
-                # "2C3074",
-                # "2BEF08",
-                # "2BFA35",
-                # "2BFD0E",
-                # "2C0115",
-                # "2C308B",
+                "2C2FF2",
+                "2C3195",
+                "2C31B0",
+                "2C31BE",
+                "2C31D2",
+                "2C3074",
+                "2BEF08",
+                "2BFA35",
+                "2BFD0E",
+                "2C0115",
+                "2C308B",
                 "2C31B4"
     ]
 

@@ -2,6 +2,18 @@
 
 #!/home/johnny/anaconda2/bin/python
 
+
+"""
+Anomoly detector
+
+TODO:
+
+--Set up Google VM with required dependencies
+--Deploy it on the cloud using Cron
+--Shall we automate the radio name retrieval process? 
+
+"""
+
 import argparse
 import pandas as pd
 import json
@@ -14,16 +26,21 @@ from influxdb import DataFrameClient
 
 
 config = SafeConfigParser()
-config_path = '/home/johnny/Photonic/machine_learning_project/anomoly_detector_config.ini'
+config_path = '/home/johnny/Photonic/Anomoly Detection/anomoly_detector_config.ini'
 config.read(config_path)
 
 #port_number = 8086
 
 account_sid = config.get('SMS_gateway','account_sid')
 auth_token = config.get('SMS_gateway','auth_token')
-radio_units = json.loads(config.get('radio','units'))
 
-receiver_numbers = config.get('SMS_gateway','receiver_numbers')
+# Getting a list of radio units from the database
+radio_units = []
+
+# The ignore list, loaded from Config
+ignore_list = json.loads(config.get('radio_ignore','units'))
+
+receiver_numbers = json.loads(config.get('SMS_gateway','receiver_numbers'))
 sender_numbers = config.get('SMS_gateway','sender_numbers')
 message = None
 SMS_client = Client(account_sid,auth_token)
@@ -31,14 +48,16 @@ SMS_client = Client(account_sid,auth_token)
 
 #hostname = 'localhost'
 photonic_host = config.get('database', 'host_address')
-admin_user = 'shane@photonicinnovations.com'
-admin_password = 'CA0inh#16'
+admin_user = config.get('database', 'admin_user')
+admin_password = config.get('database', 'admin_password')
 
 user = config.get('database', 'user')
 password = config.get('database', 'password')
 port = config.get('database', 'port')
 dbname = config.get('database', 'dbname')
 
+
+debug = config.get('detector_settings','debug')
 
 
 
@@ -55,7 +74,7 @@ def send_SMS(client,receiver,sender,message):
 )
 
 
-def smooth(x, window_len=11, window='hanning'):
+def smooth(x, window_len=11, window='flat'):
     """smooth the data using a window with requested size.
 
     This method is based on the convolution of a scaled window with the signal.
@@ -70,20 +89,7 @@ def smooth(x, window_len=11, window='hanning'):
             flat window will produce a moving average smoothing.
 
     output:
-        the smoothed signal
-
-    example:
-
-    t=linspace(-2,2,0.1)
-    x=sin(t)+randn(len(t))*0.1
-    y=smooth(x)￼
-
-    see also: 
-
-    numpy.hanning, numpy.hamming, numpy.bartlett, numpy.blackman, numpy.convolve
-    scipy.signal.lfilter
-
-    TODO: the window parameter could be the window itself if an array instead of a string   
+        the smoothed signal  
     """
 
     if x.ndim != 1:
@@ -114,6 +120,21 @@ def local_maximum(x):
     f = np.r_[True, x[1:] > x[:-1]] & np.r_[x[:-1] > x[1:], True]
     return (index_array[f], x[f])
 
+def get_unit_list(client):
+    query_content = "SHOW MEASUREMENTS"
+    result_list = []
+
+    raw_result = client.query(query_content)
+    raw_result = raw_result._raw.values()[0][0].values()[0]
+
+    for unit in raw_result:
+        for radio in unit:
+            result_list.append(radio)
+
+    return result_list
+
+
+
 def make_query(client,radio_unit, inspected_value_type,backdate, interval):
 
     query_content = "SELECT distinct(\"" + inspected_value_type + "\") FROM " + "\"" + radio_unit + "\" " + \
@@ -127,6 +148,7 @@ def make_query(client,radio_unit, inspected_value_type,backdate, interval):
 
 
     raw_result = client.query(query_content)
+
     # print raw_result
 
     if len(raw_result) <= 0:
@@ -157,9 +179,14 @@ def apply_noise_filter(window_size, data, indices,mode='flat'):
 def main():
     """Instantiate the connection to the InfluxDB client."""
 
+    global radio_units
     client = DataFrameClient(photonic_host, port, user, password, database=dbname)
     # client.switch_user('johnny','johnny')
 
+    radio_units =  get_unit_list(client)
+
+    # Remove the ignore_list from the radio list to perform checks on.
+    radio_units = list(set(radio_units) & set(set(radio_units) ^ set(ignore_list)))
 
     sensitivity = float(config.get('detector_settings','sensitivity'))
     days = int(config.get('detector_settings','time_period'))
@@ -180,9 +207,9 @@ def main():
 
         if available_days > days:
             nh3_data = nh3_data.reshape(len(nh3_data))
-            window_size = days * 2
+            window_size = days
 
-            # Window size needs to be automated, somehow.
+
             smoothed_data,max_value,max_index = apply_noise_filter(
                 window_size,nh3_data, indices, mode='flat')
 
@@ -193,25 +220,23 @@ def main():
             if smoothed_data[-1] > threshold:
                 message = "Alert! Rising trend in " + value_type + "\nUnit: " + current_radio + " is  " \
                 "above threshold by " + str(sensitivity) + " percent at: " + str(indices[-1])
-                print message
-                send_SMS(client=SMS_client,receiver=receiver_numbers ,sender=sender_numbers,message=message)
 
-            print ("Max value in the smoothed out result is " + str() + " occuring at: " + str(indices[max_index]) + "\n")
+                for number in receiver_numbers:
+                    send_SMS(client=SMS_client,receiver=number ,sender=sender_numbers,message=message)
 
 
-            # plt.plot(nh3_data)
-            # plt.plot(smoothed_data)
-            # plt.title("Radio unit: " + current_radio + ": " + value_type + " over: " +
-            #           str(days) + " days, displayed every " + interval + "\ntotal entries: " + str(len(nh3_data))   )
-            # plt.show()
+                if debug:
+                    print ("Max value in the smoothed out result is " + str() + " occuring at: " + str(indices[max_index]) + "\n")
+                    plt.plot(nh3_data)
+                    plt.plot(smoothed_data)
+                    plt.title("Radio unit: " + current_radio + ": " + value_type + " over: " +
+                              str(days) + " days, displayed every " + interval + "\ntotal entries: " + str(len(nh3_data))   )
+                    plt.show()
 
         else:
             print "insufficient data in the specified period for unit: " + current_radio + "\n"
             # print "specified period: " + str(days) + " days, when there are only " \
             #       + str(len(nh3_data)) + " entries recorded for unit " + current_radio
-
-    # client.switch_database('photonic')
-    # print client.get_list_users()
 
 
 
